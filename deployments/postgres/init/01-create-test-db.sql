@@ -1,0 +1,13 @@
+-- Runs once, only against a fresh postgres_data volume (Postgres only
+-- executes docker-entrypoint-initdb.d scripts on first init). Creates a
+-- second database, separate from the app's own "hospital_middleware", for
+-- internal/postgres's integration tests to run against.
+--
+-- Why this exists: those tests TRUNCATE every table they touch (including
+-- hospitals) before each test, for isolation between tests. Without a
+-- separate database, that truncation runs against the same database the
+-- seed migration (000002_seed_hospitals) populates for real API traffic —
+-- so `go test ./...` against a live `docker-compose up` stack would wipe
+-- the hospital_a reference row the running API depends on. Found exactly
+-- this happening during manual end-to-end verification.
+CREATE DATABASE hospital_middleware_test OWNER hospital_middleware;

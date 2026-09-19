@@ -1,0 +1,387 @@
+openapi: 3.0.3
+info:
+  title: Hospital Middleware API
+  description: >
+    Middleware that unifies search/display of patient information across
+    multiple Hospital Information Systems (HIS), scoped to each staff
+    member's own hospital. See api-spec.md for narrative documentation,
+    behavior notes, and explicit assumptions.
+  version: "1.0.0"
+servers:
+  - url: /
+    description: Routes match the scope's literal paths exactly (e.g. /staff/create).
+
+tags:
+  - name: staff
+  - name: patient
+
+paths:
+  /staff/create:
+    post:
+      tags: [staff]
+      summary: Create a new hospital staff member with login credentials
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StaffCreateRequest'
+      responses:
+        '201':
+          description: Staff member created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaffCreateResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '409':
+          description: Username already exists for this hospital
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error:
+                  code: USERNAME_TAKEN
+                  message: username already exists for that hospital
+        '422':
+          description: Unknown hospital code
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error:
+                  code: UNKNOWN_HOSPITAL
+                  message: hospital code not recognized
+
+  /staff/login:
+    post:
+      tags: [staff]
+      summary: Staff login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StaffLoginRequest'
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          description: >
+            Invalid username, password, or hospital combination — deliberately
+            identical for all three causes (unknown hospital, unknown
+            username, wrong password), to avoid letting a client enumerate
+            valid hospital codes or usernames from the response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error:
+                  code: INVALID_CREDENTIALS
+                  message: username or password is incorrect
+
+  /staff/refresh:
+    post:
+      tags: [staff]
+      summary: Exchange a refresh token for a new access/refresh token pair
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshRequest'
+      responses:
+        '200':
+          description: Tokens rotated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '401':
+          description: Refresh token invalid, expired, or revoked
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error:
+                  code: INVALID_REFRESH_TOKEN
+                  message: refresh token is invalid or expired
+
+  /patient/search:
+    post:
+      tags: [patient]
+      summary: Search patients scoped to the authenticated staff member's hospital
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatientSearchRequest'
+      responses:
+        '200':
+          description: Matching patients
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatientSearchResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          description: Missing, invalid, or expired access token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                missing_header:
+                  summary: Authorization header absent or malformed
+                  value:
+                    error:
+                      code: UNAUTHENTICATED
+                      message: missing or malformed Authorization header
+                invalid_token:
+                  summary: Token present but invalid or expired
+                  value:
+                    error:
+                      code: UNAUTHENTICATED
+                      message: invalid or expired access token
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  responses:
+    ValidationError:
+      description: Request failed validation
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: VALIDATION_ERROR
+              message: invalid request
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+              example: INVALID_CREDENTIALS
+            message:
+              type: string
+              example: username or password is incorrect
+          required: [code, message]
+      required: [error]
+
+    StaffCreateRequest:
+      type: object
+      properties:
+        username:
+          type: string
+          maxLength: 50
+          description: trimmed of leading/trailing whitespace; unique per hospital
+          example: nurse_j
+        password:
+          type: string
+          format: password
+          minLength: 10
+          maxLength: 20
+          example: S3cur3P@ss!
+        hospital:
+          type: string
+          maxLength: 50
+          description: hospital code (hospitals.code), not the display name; trimmed the same way as username
+          example: hospital_a
+      required: [username, password, hospital]
+
+    StaffCreateResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        username:
+          type: string
+        hospital:
+          type: string
+          description: hospital code, echoed back exactly as submitted (hospitals.code)
+        created_at:
+          type: string
+          format: date-time
+      required: [id, username, hospital, created_at]
+
+    StaffLoginRequest:
+      type: object
+      properties:
+        username:
+          type: string
+          maxLength: 50
+          description: trimmed of leading/trailing whitespace before lookup
+        password:
+          type: string
+          format: password
+        hospital:
+          type: string
+          maxLength: 50
+          description: trimmed the same way as username
+      required: [username, password, hospital]
+
+    RefreshRequest:
+      type: object
+      properties:
+        refresh_token:
+          type: string
+      required: [refresh_token]
+
+    TokenResponse:
+      type: object
+      properties:
+        access_token:
+          type: string
+        refresh_token:
+          type: string
+        token_type:
+          type: string
+          example: Bearer
+        expires_in:
+          type: integer
+          description: access token lifetime in seconds
+          example: 900
+      required: [access_token, refresh_token, token_type, expires_in]
+
+    PatientSearchRequest:
+      type: object
+      description: >-
+        All fields optional. Empty body returns all patients in the staff
+        member's hospital, paginated. Every string filter below is trimmed
+        of whitespace and treated as not-provided if that leaves it empty
+        (e.g. "" behaves like omitting the field), and rejected as
+        VALIDATION_ERROR if longer than 200 characters after trimming.
+      properties:
+        national_id:
+          type: string
+          maxLength: 200
+          nullable: true
+        passport_id:
+          type: string
+          maxLength: 200
+          nullable: true
+        first_name:
+          type: string
+          maxLength: 200
+          nullable: true
+        middle_name:
+          type: string
+          maxLength: 200
+          nullable: true
+        last_name:
+          type: string
+          maxLength: 200
+          nullable: true
+        date_of_birth:
+          type: string
+          format: date
+          nullable: true
+        phone_number:
+          type: string
+          maxLength: 200
+          nullable: true
+        email:
+          type: string
+          format: email
+          maxLength: 200
+          nullable: true
+        page:
+          type: integer
+          default: 1
+          minimum: 1
+        page_size:
+          type: integer
+          default: 20
+          minimum: 1
+          maximum: 100
+
+    Patient:
+      type: object
+      description: >-
+        patient_hn, first_name_th, last_name_th, first_name_en, and
+        last_name_en are NOT NULL columns (migrations/000001_init.up.sql),
+        always populated from Hospital A's contract — never null. Everything
+        else may legitimately be absent.
+      properties:
+        patient_hn:
+          type: string
+        national_id:
+          type: string
+          nullable: true
+        passport_id:
+          type: string
+          nullable: true
+        first_name_th:
+          type: string
+        middle_name_th:
+          type: string
+          nullable: true
+        last_name_th:
+          type: string
+        first_name_en:
+          type: string
+        middle_name_en:
+          type: string
+          nullable: true
+        last_name_en:
+          type: string
+        date_of_birth:
+          type: string
+          format: date
+          nullable: true
+        phone_number:
+          type: string
+          nullable: true
+        email:
+          type: string
+          nullable: true
+        gender:
+          type: string
+          enum: [M, F]
+          nullable: true
+      required: [patient_hn, first_name_th, last_name_th, first_name_en, last_name_en]
+
+    PatientSearchResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Patient'
+        page:
+          type: integer
+        page_size:
+          type: integer
+        total:
+          type: integer
+      required: [data, page, page_size, total]

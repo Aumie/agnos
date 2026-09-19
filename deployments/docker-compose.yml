@@ -1,0 +1,89 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: hospital_middleware
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-hospital_middleware}
+      POSTGRES_DB: hospital_middleware
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hospital_middleware"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  migrate:
+    image: migrate/migrate:v4.17.1
+    volumes:
+      - ../migrations:/migrations
+    command:
+      [
+        "-path", "/migrations",
+        "-database", "postgres://hospital_middleware:${POSTGRES_PASSWORD:-hospital_middleware}@postgres:5432/hospital_middleware?sslmode=disable",
+        "up",
+      ]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # Applies the same migrations to hospital_middleware_test (created by
+  # postgres/init/01-create-test-db.sql) — kept separate from the "migrate"
+  # service above so internal/postgres's tests never touch the app's own
+  # seeded database. See that init script's comment for why this exists.
+  migrate-test:
+    image: migrate/migrate:v4.17.1
+    volumes:
+      - ../migrations:/migrations
+    command:
+      [
+        "-path", "/migrations",
+        "-database", "postgres://hospital_middleware:${POSTGRES_PASSWORD:-hospital_middleware}@postgres:5432/hospital_middleware_test?sslmode=disable",
+        "up",
+      ]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  mockserver:
+    build:
+      context: ..
+      dockerfile: deployments/Dockerfile
+      target: mockserver
+    expose:
+      - "9000"
+
+  api:
+    build:
+      context: ..
+      dockerfile: deployments/Dockerfile
+      target: api
+    environment:
+      PORT: "8080"
+      DATABASE_URL: postgres://hospital_middleware:${POSTGRES_PASSWORD:-hospital_middleware}@postgres:5432/hospital_middleware?sslmode=disable
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-real-deployments}
+      BASE_URL_HOSPITAL_A: http://mockserver:9000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      mockserver:
+        condition: service_started
+    expose:
+      - "8080"
+
+  nginx:
+    image: nginx:1.27-alpine
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "80:80"
+    depends_on:
+      - api
+
+volumes:
+  postgres_data:

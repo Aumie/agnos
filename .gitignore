@@ -1,0 +1,17 @@
+# Go
+/bin/
+*.test
+*.out
+*.prof
+
+# Env / secrets — listed as exact filenames, not a wildcard (a wildcard
+# like ".env.*" also matches its own ".env.*.example" template file, which
+# has bitten this project twice already — see docs/DECISION_LOG.md).
+.env
+gcp.env
+
+# Editor/OS cruft
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
