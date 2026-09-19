@@ -1,6 +1,6 @@
 # Project Structure
 
-Hospital Middleware — single Go service, package-by-feature (idiomatic Go, not layer-by-layer).
+Hospital Middleware — single Go service, package-by-feature.
 
 ## Layout
 
